@@ -159,7 +159,7 @@ func main() {
 	// Parse Args
 	args := os.Args[1:]
 	if len(args) < 1 {
-		log.Fatal("Not enough arguments! Plase parse at least one input e.g. 225.0.0.1:20000,172.0.0.1,My_Service")
+		log.Fatal("Not enough arguments! Please parse at least one input e.g. 225.0.0.1:20000,172.0.0.1,My_Service")
 	}
 
 	for _, item := range args {
@@ -196,5 +196,13 @@ func main() {
 	handler := promhttp.HandlerFor(r, promhttp.HandlerOpts{})
 
 	http.Handle("/metrics", handler)
-	http.ListenAndServe(":8000", nil)
+
+	// Get the port from the environment variable, default to 8000 if not set
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8000"
+	}
+
+	log.Printf("Starting server on port %s", port)
+	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
