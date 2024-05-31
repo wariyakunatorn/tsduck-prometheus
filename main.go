@@ -10,15 +10,35 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 	"tsduck-prometheus/models"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+const silenceThreshold = 10.0           // Bitrate threshold for detecting silence
+const silenceDuration = 5 * time.Second // Duration to consider as silence
+
+var silenceDetected = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "audio_silence_detected",
+		Help: "Indicates whether silence is detected in the audio stream (1 for silence, 0 for no silence).",
+	},
+	[]string{"multicast", "label", "pid"},
+)
+
 func updatePidValues(multicast, label string, pid models.Pids) {
+	bitrate := float64(pid.Bitrate)
+
 	// PID Bitrate
-	models.TsPidBitrate.WithLabelValues(multicast, label, fmt.Sprint(pid.Id), strconv.FormatInt(int64(pid.Id), 16), pid.Description).Set(float64(pid.Bitrate))
+	models.TsPidBitrate.WithLabelValues(multicast, label, fmt.Sprint(pid.Id), strconv.FormatInt(int64(pid.Id), 16), pid.Description).Set(bitrate)
+
+	// Check for audio silence
+	if pid.Description == "audio" {
+		checkAudioSilence(multicast, label, pid.Id, bitrate)
+	}
+
 	// PID Service Count
 	models.TsPidServiceCount.WithLabelValues(multicast, label, fmt.Sprint(pid.Id), strconv.FormatInt(int64(pid.Id), 16), pid.Description).Set(float64(pid.SeviceCount))
 	// PID Discontinuities Count
@@ -36,6 +56,15 @@ func updatePidValues(multicast, label string, pid models.Pids) {
 			sum += 1
 			models.TsPidDuplicated.WithLabelValues(multicast, label, fmt.Sprint(pid.Id), strconv.FormatInt(int64(pid.Id), 16), pid.Description).Inc()
 		}
+	}
+}
+
+func checkAudioSilence(multicast, label string, pid int, bitrate float64) {
+	if bitrate < silenceThreshold {
+		silenceDetected.WithLabelValues(multicast, label, fmt.Sprint(pid)).Set(1)
+		log.Printf("Silence detected on %s:%s PID %d", multicast, label, pid)
+	} else {
+		silenceDetected.WithLabelValues(multicast, label, fmt.Sprint(pid)).Set(0)
 	}
 }
 
@@ -192,6 +221,7 @@ func main() {
 	r.MustRegister(models.TsPidCount)
 	r.MustRegister(models.TsPcrPidCount)
 	r.MustRegister(models.TsPidUnferencedCount)
+	r.MustRegister(silenceDetected)
 
 	handler := promhttp.HandlerFor(r, promhttp.HandlerOpts{})
 
